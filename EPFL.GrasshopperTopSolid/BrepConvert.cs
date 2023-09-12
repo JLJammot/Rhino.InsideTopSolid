@@ -41,7 +41,7 @@ namespace EPFL.GrasshopperTopSolid
             TSXGen.List<EdgeList> listEdges = new TSXGen.List<EdgeList>();
             //TSXGen.List<TKGD3.Shapes.Vertex> vertexlist = new TSXGen.List<TKGD3.Shapes.Vertex>();
             double tol_Rh = RhinoDoc.ActiveDoc.ModelAbsoluteTolerance;
-            double tol_TS = TopSolid.Kernel.G.Precision.ModelingLinearTolerance;
+            double tol_TS = TopSolid.Kernel.G.Precision.ModelingLinearTolerance / 2;
             bool forcesNonPeriodic = false;
             if (face.GeometryType == SurfaceGeometryType.Cone || face.GeometryType == SurfaceGeometryType.Cylinder || face.GeometryType == SurfaceGeometryType.Sphere || face.GeometryType == SurfaceGeometryType.Torus || face.GeometryType == SurfaceGeometryType.Revolved)
                 forcesNonPeriodic = true;
@@ -188,14 +188,18 @@ namespace EPFL.GrasshopperTopSolid
             brepsrf.AddSurface(topSolidSurface.ToRhino());
             BrepFace bface = brepsrf.Faces.Add(0);
             BrepLoop rhinoLoop = null;
-            Loop outerLoop =  face.SearchOuterLoop();
+            Loop outerLoop = face.SearchOuterLoop();
             bool isOuter = false;
 
             //Get the 2D Curves and convert them to Rhino
             int x = 0;
             foreach (TKGD2.Curves.IGeometricProfile c in list2D)
             {
-                if (outerLoop != null && !outerLoop.IsEmpty)
+                if (list2D.Count == 1)
+                {
+                    isOuter = true;
+                }
+                else if (outerLoop != null && !outerLoop.IsEmpty)
                 {
                     foreach (Edge edge in listEdges[loopindex])
                     {
@@ -206,6 +210,17 @@ namespace EPFL.GrasshopperTopSolid
                         }
                     }
                 }
+
+                else
+                {
+                    if (listEdges[loopindex].Contains(Edge.Empty))
+                    {
+                        isOuter = true;
+                        //break;
+                    }
+                }
+
+
 
                 if (isOuter)
                     rhinoLoop = brepsrf.Loops.Add(BrepLoopType.Outer, bface);
@@ -321,20 +336,25 @@ namespace EPFL.GrasshopperTopSolid
             }
 
             double tolerance = 0.00001; /*RhinoDoc.ActiveDoc.ModelAbsoluteTolerance*/
-            var  result = Brep.JoinBreps(listofBrepsrf, tolerance);
-            if (result is null || !result.First().IsValid)
-            {
-                result = Brep.JoinBreps(listofBrepsrf, tolerance*5);
+            var result = Brep.JoinBreps(listofBrepsrf, tolerance);
 
-                if (result is null || !result.First().IsValid)
-                {
-                    result = Brep.CreateBooleanUnion(listofBrepsrf, tolerance);
-                    if (result is null)
-                        result = Brep.CreateBooleanUnion(listofBrepsrf, tolerance*5);
-                }
+
+            if (result is null || result.Length > 1 || !result.First().IsValid)
+            {
+                result = Brep.JoinBreps(listofBrepsrf, tolerance * 5);//TODO
+
+                //if (result is null || !result.First().IsValid)
+                //{
+                //    result = Brep.CreateBooleanUnion(listofBrepsrf, tolerance);
+                //    if (result is null)
+                //        result = Brep.CreateBooleanUnion(listofBrepsrf, tolerance * 5);
+                //}
             }
 
             //var result = Brep.JoinBreps(listofBrepsrf, tolerance );
+
+            if (result is null)
+                return listofBrepsrf.ToArray();
 
             foreach (Brep b in result)
             {
@@ -344,11 +364,6 @@ namespace EPFL.GrasshopperTopSolid
                     b.Repair(tolerance);
                 }
             }
-
-            //for (int i = 0; i < result.Length; i++)
-            //{
-            //    result[i].Repair(RhinoDoc.ActiveDoc.ModelAbsoluteTolerance);
-            //}
 
             return result;
 
@@ -381,7 +396,7 @@ namespace EPFL.GrasshopperTopSolid
             int countEdgesFlattened = listEdgesFlattened.Count();
 
 
-            bool profilesEqualsLoopCount = count2dProfiles == count3dProfiles && count2dProfiles == loopCount && count3dProfiles == coundEdges;
+            bool profilesEqualsLoopCount = count2dProfiles == count3dProfiles && /*count2dProfiles == loopCount &&*/ count3dProfiles == coundEdges;
             bool flattenedequals = count2dSegmentsFlattened == count3dSegmentsFlattened && count2dSegmentsFlattened == countEdgesFlattened;
 
             bool result = profilesEqualsLoopCount && flattenedequals;
@@ -465,6 +480,10 @@ namespace EPFL.GrasshopperTopSolid
 
             //TODO check if planar to simplify
             TKGD3.Surfaces.Surface topSolidSurface = surface.ToHost();
+            if (!topSolidSurface.IsValid)
+            {
+                Console.WriteLine("error");
+            }
 
             if (topSolidSurface != null && topSolidSurface is BSplineSurface bsplineSurface && (topSolidSurface.IsUPeriodic || topSolidSurface.IsVPeriodic))
             {
@@ -498,7 +517,16 @@ namespace EPFL.GrasshopperTopSolid
                 foreach (var trim in loop.Trims)
                 {
                     if (loops3d.Count < loopIndex - 1 || listItemMok.Count < loopIndex - 1) break;
-                    loops3d[loopIndex].Add(trim.Edge.EdgeCurve.ToHost());
+                    //Rhino.Geometry.Curve edgeCurve= trim.Edge.EdgeCurve;
+
+                    if (trim.Edge != null) //trim.Edge can be null for singular Trims
+                        loops3d[loopIndex].Add(trim.Edge.EdgeCurve.ToHost());
+                    //else
+                    //{
+                    //    Rhino.Geometry.Curve edgeCurve = trim.
+                    //    loops3d[loopIndex].Add(trim.Edge.EdgeCurve.ToHost());
+                    //}
+
                     listItemMok[loopIndex].Add(new ItemMoniker(false, (byte)ItemType.SketchSegment, key, i++));
                 }
                 loopIndex++;
@@ -532,11 +560,15 @@ namespace EPFL.GrasshopperTopSolid
 
             TrimmedSheetMaker sheetMaker = new TrimmedSheetMaker(SX.Version.Current);
             sheetMaker.LinearTolerance = inLinearPrecision;
-            Rhino.Geometry.Surface surface = inFace.DuplicateSurface();
+            Rhino.Geometry.Surface surface = inBRep.Surfaces[inFace.FaceIndex];
 
             // Closed BSpline surfaces must be made periodic for parasolid with 2d curves (according to torus and sphere in v5_example.3dm).
             // If new problems come, see about the periodicity of the curves.
-            TKGD3.Surfaces.Surface topSolidSurface = Convert.ToHost(surface);
+            TKGD3.Surfaces.Surface topSolidSurface = surface.ToHost();
+            if (!topSolidSurface.IsValid)
+            {
+                Console.WriteLine("error");
+            }
             if (topSolidSurface != null && topSolidSurface is BSplineSurface bsplineSurface && ((bsplineSurface.IsUClosed && bsplineSurface.IsUPeriodic == false) || (bsplineSurface.IsVClosed && bsplineSurface.IsVPeriodic == false)))
             {
                 bsplineSurface = (BSplineSurface)bsplineSurface.Clone();
