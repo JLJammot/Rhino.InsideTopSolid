@@ -32,7 +32,7 @@ namespace EPFL.GrasshopperTopSolid.Components.Preview
         public BakeLocalPart()
           : base("BakeLocalPart", "LP",
               "Bakes Rhino Geometry into Local Part inserted in Assembly",
-              "TopSolid", "Preview")
+              "TopSolid", "To TopSolid")
         {
         }
 
